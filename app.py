@@ -6,6 +6,10 @@ import base64
 app = Flask(__name__)
 cam = Camera()
 
+@app.route("/")
+def index():
+    return {"data":"Camera is ready!"}
+
 @app.route("/tabilde", methods=["POST"])
 def ta_bilde():
     # Ta bilde og lagre midlertidig
