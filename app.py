@@ -65,9 +65,6 @@ def capture():
         "-o", filename
     ]
 
-    # Manual exposure if shutter or gain requested
-    if shutter_val or gain_val:
-        cmd += ["--exposure", "off"]
 
     if shutter_val:
         cmd += ["--shutter", str(shutter_val)]
