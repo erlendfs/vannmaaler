@@ -43,6 +43,9 @@ def capture():
     shutter = request.values.get("shutter", None)
     gain = request.values.get("gain", None)
 
+    # Debug incoming raw params
+    print("Incoming params:", {"shutter_raw": shutter, "gain_raw": gain})
+
     try:
         shutter_val = int(shutter) if shutter else None
     except ValueError:
@@ -52,6 +55,21 @@ def capture():
         gain_val = float(gain) if gain else None
     except ValueError:
         return jsonify({"error": "invalid gain value"}), 400
+
+    # Heuristic: convert common units to microseconds if caller sent seconds or ms by mistake.
+    # - If <=30 treat as seconds (e.g. "2" -> 2 seconds).
+    # - If <=30000 treat as milliseconds (e.g. "2000" -> 2000 ms).
+    if shutter_val is not None:
+        if shutter_val <= 30:
+            print("Interpreting shutter as seconds; converting to microseconds")
+            shutter_val = int(shutter_val * 1_000_000)
+        elif shutter_val <= 30000:
+            print("Interpreting shutter as milliseconds; converting to microseconds")
+            shutter_val = int(shutter_val * 1000)
+
+    # Safety cap (e.g. 600 seconds = 600_000_000 µs)
+    if shutter_val is not None and shutter_val > 600_000_000:
+        return jsonify({"error": "shutter value too large"}), 400
 
     # Unique filename using timestamp (milliseconds)
     timestamp = int(time.time() * 1000)
