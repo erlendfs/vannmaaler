@@ -1,18 +1,18 @@
+import time
+import threading
 from flask import Flask, jsonify, request, send_file
-import tempfile
 import subprocess
 import shutil
 import os
-import time
-import threading
 
 app = Flask(__name__)
 
-# Check for rpicam-still instead of libcamera-jpeg
+# Check if rpicam-still is installed
 RPICAM_STILL = shutil.which("rpicam-still") is not None
 
-# Prevent concurrent camera access
+# Lock to prevent simultaneous camera access
 CAMERA_LOCK = threading.Lock()
+
 
 @app.route("/", methods=["GET"])
 def home():
@@ -24,35 +24,40 @@ def home():
     }
     return jsonify(status), 200
 
+
 @app.route("/capture", methods=["GET", "POST"])
 def capture():
     """
     Capture a full-resolution image.
-    Query / form parameter:
+
+    Query / form parameters:
       - shutter: exposure time in microseconds (int). Optional.
       - gain: analog gain (float). Optional, e.g., 4.0
+
     Returns JPEG image.
     """
     if not RPICAM_STILL:
-        return jsonify({"error": "rpicam-still not available on this system"}), 500
+        return jsonify({"error": "rpicam-still not available"}), 500
 
+    # Parse shutter and gain
     shutter = request.values.get("shutter", None)
     gain = request.values.get("gain", None)
 
     try:
-        shutter_val = int(shutter) if shutter is not None else None
+        shutter_val = int(shutter) if shutter else None
     except ValueError:
         return jsonify({"error": "invalid shutter value"}), 400
 
     try:
-        gain_val = float(gain) if gain is not None else None
+        gain_val = float(gain) if gain else None
     except ValueError:
         return jsonify({"error": "invalid gain value"}), 400
 
-    tmpf = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-    tmpf.close()
-    filename = tmpf.name
+    # Unique filename using timestamp (milliseconds)
+    timestamp = int(time.time() * 1000)
+    filename = f"/tmp/capture_{timestamp}.jpg"
 
+    # Build rpicam-still command
     cmd = [
         "rpicam-still",
         "-n",                 # no preview
@@ -60,27 +65,38 @@ def capture():
         "-o", filename
     ]
 
-    if shutter_val is not None and shutter_val > 0:
+    # Manual exposure if shutter or gain requested
+    if shutter_val or gain_val:
+        cmd += ["--exposure", "off"]
+
+    if shutter_val:
         cmd += ["--shutter", str(shutter_val)]
-    if gain_val is not None and gain_val > 0:
+    if gain_val:
         cmd += ["--gain", str(gain_val)]
 
-    # Only allow one capture at a time
+    # Take the picture (thread-safe)
     with CAMERA_LOCK:
         try:
             subprocess.run(cmd, check=True, timeout=30, stderr=subprocess.PIPE)
-            return send_file(filename, mimetype="image/jpeg", conditional=False)
+            response = send_file(filename, mimetype="image/jpeg", conditional=False)
         except subprocess.CalledProcessError as e:
             return jsonify({"error": "capture failed", "details": e.stderr.decode(errors="ignore")}), 500
         except subprocess.TimeoutExpired:
             return jsonify({"error": "capture timeout"}), 504
-        finally:
-            try:
-                if os.path.exists(filename):
-                    os.remove(filename)
-            except Exception:
-                pass
+
+    # Optional: clean up temp file after a short delay
+    def cleanup_file(f):
+        try:
+            if os.path.exists(f):
+                os.remove(f)
+        except Exception:
+            pass
+
+    threading.Thread(target=lambda: (time.sleep(5), cleanup_file(filename))).start()
+
+    return response
+
 
 if __name__ == "__main__":
-    # Development only; use Gunicorn + systemd in production
+    # Development only; for production use Gunicorn + systemd
     app.run(host="0.0.0.0", port=5001)
