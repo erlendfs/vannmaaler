@@ -61,11 +61,14 @@ def capture():
     cmd = [
         "rpicam-still",
         "-n",                 # no preview
-        f"--shutter {shutter_val}" if shutter_val else "",
-        f"--gain {gain_val}" if gain_val else "",
+        "--quality", "95",
         "-o", filename
     ]
 
+    if shutter_val is not None:
+        cmd.extend(["--shutter", str(shutter_val)])
+    if gain_val is not None:
+        cmd.extend(["--gain", str(gain_val)])
 
 
     print(f"Executing command: {' '.join(cmd)}")
