@@ -4,10 +4,15 @@ import subprocess
 import shutil
 import os
 import time
+import threading
 
 app = Flask(__name__)
 
-LIBCAMERA_JPEG = shutil.which("libcamera-jpeg") is not None
+# Check for rpicam-still instead of libcamera-jpeg
+RPICAM_STILL = shutil.which("rpicam-still") is not None
+
+# Prevent concurrent camera access
+CAMERA_LOCK = threading.Lock()
 
 @app.route("/", methods=["GET"])
 def home():
@@ -15,7 +20,7 @@ def home():
     status = {
         "status": "ok",
         "timestamp": int(time.time()),
-        "libcamera_jpeg_available": LIBCAMERA_JPEG
+        "rpicam_still_available": RPICAM_STILL
     }
     return jsonify(status), 200
 
@@ -25,44 +30,57 @@ def capture():
     Capture a full-resolution image.
     Query / form parameter:
       - shutter: exposure time in microseconds (int). Optional.
+      - gain: analog gain (float). Optional, e.g., 4.0
     Returns JPEG image.
     """
+    if not RPICAM_STILL:
+        return jsonify({"error": "rpicam-still not available on this system"}), 500
+
     shutter = request.values.get("shutter", None)
+    gain = request.values.get("gain", None)
+
     try:
         shutter_val = int(shutter) if shutter is not None else None
     except ValueError:
         return jsonify({"error": "invalid shutter value"}), 400
 
-    # Use libcamera-jpeg if available (reliable on Raspberry Pi OS with libcamera stack)
-    if not LIBCAMERA_JPEG:
-        return jsonify({"error": "libcamera-jpeg not available on this system"}), 500
+    try:
+        gain_val = float(gain) if gain is not None else None
+    except ValueError:
+        return jsonify({"error": "invalid gain value"}), 400
 
     tmpf = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
     tmpf.close()
     filename = tmpf.name
 
-    cmd = ["libcamera-jpeg", "-o", filename, "--nopreview"]
-    # If shutter provided, pass it through (microseconds)
+    cmd = [
+        "rpicam-still",
+        "-n",                 # no preview
+        "--quality", "95",
+        "-o", filename
+    ]
+
     if shutter_val is not None and shutter_val > 0:
         cmd += ["--shutter", str(shutter_val)]
-    # Let libcamera select native (full) resolution by not specifying width/height
-    # Optional: increase quality
-    cmd += ["--quality", "95"]
+    if gain_val is not None and gain_val > 0:
+        cmd += ["--gain", str(gain_val)]
 
-    try:
-        subprocess.run(cmd, check=True, timeout=30, stderr=subprocess.PIPE)
-        return send_file(filename, mimetype="image/jpeg")
-    except subprocess.CalledProcessError as e:
-        return jsonify({"error": "capture failed", "details": e.stderr.decode(errors="ignore")}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "capture timeout"}), 504
-    finally:
+    # Only allow one capture at a time
+    with CAMERA_LOCK:
         try:
-            if os.path.exists(filename):
-                os.remove(filename)
-        except Exception:
-            pass
+            subprocess.run(cmd, check=True, timeout=30, stderr=subprocess.PIPE)
+            return send_file(filename, mimetype="image/jpeg", conditional=False)
+        except subprocess.CalledProcessError as e:
+            return jsonify({"error": "capture failed", "details": e.stderr.decode(errors="ignore")}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "capture timeout"}), 504
+        finally:
+            try:
+                if os.path.exists(filename):
+                    os.remove(filename)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
-    # Bind to all interfaces so device can be reached on local network
+    # Development only; use Gunicorn + systemd in production
     app.run(host="0.0.0.0", port=5001)
