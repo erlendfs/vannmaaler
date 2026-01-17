@@ -62,13 +62,22 @@ def capture():
         "rpicam-still",
         "-n",                 # no preview
         "--quality", "95",
-        "-o", filename
+        "-o", filename,
+        "--immediate"
     ]
 
+    # Always add shutter if provided
     if shutter_val is not None:
         cmd.extend(["--shutter", str(shutter_val)])
-    if gain_val is not None:
-        cmd.extend(["--gain", str(gain_val)])
+
+    # Only add gain and awbgains when shutter > 1,000,000 (long exposure)
+    if shutter_val is not None and shutter_val > 1000000:
+        # use provided gain if present, otherwise default to 4.0
+        if gain_val is not None:
+            cmd.extend(["--gain", str(gain_val)])
+        else:
+            cmd.extend(["--gain", "4.0"])
+        cmd.extend(["--awbgains", "1,0.6"])
 
 
     print(f"Executing command: {' '.join(cmd)}")
