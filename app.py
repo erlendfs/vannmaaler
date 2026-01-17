@@ -71,6 +71,8 @@ def capture():
     if gain_val:
         cmd += ["--gain", str(gain_val)]
 
+    print(f"Executing command: {' '.join(cmd)}")
+
     # Take the picture (thread-safe)
     with CAMERA_LOCK:
         try:
