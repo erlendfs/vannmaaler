@@ -82,8 +82,8 @@ def capture():
         "--quality", "95",
         "-o", filename,
         "--immediate",
-        "-w", "3280",
-        "-h", "2464"
+        "--width", "3280",
+        "--height", "2464"
     ]
 
     # Always add shutter if provided
