@@ -81,7 +81,9 @@ def capture():
         "-n",                 # no preview
         "--quality", "95",
         "-o", filename,
-        "--immediate"
+        "--immediate",
+        "-w", "3280",
+        "-h", "2464"
     ]
 
     # Always add shutter if provided
